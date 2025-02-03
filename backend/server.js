@@ -9,6 +9,8 @@ import { connectDB } from "../backend/config/db.js";
 import { initializePassport } from "../backend/config/passport.js";
 import User from "../backend/models/User.js";
 import productRoutes from "../backend/routes/productRoutes.js";
+import orderRoutes from "../backend/routes/orderRoutes.js";  // Import order routes
+import stripe from "stripe";
 
 dotenv.config();
 connectDB();
@@ -16,6 +18,7 @@ connectDB();
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const stripeClient = stripe(process.env.STRIPE_SECRET_KEY); // Initialize Stripe
 
 // Middleware
 app.use(cors({
@@ -131,6 +134,43 @@ app.get("/user", ensureAuthenticated, restrictAccess("/user"), (req, res) => {
 
 // Product Routes
 app.use("/products", productRoutes);
+
+// Order Routes
+app.use("/orders", orderRoutes);  // Use the new order routes
+
+// Stripe Routes
+
+// Endpoint to create Stripe Checkout session
+app.post("/create-checkout-session", async (req, res) => {
+  const { cart, totalAmount } = req.body;
+
+  try {
+    // Create a checkout session with the cart data
+    const session = await stripeClient.checkout.sessions.create({
+      payment_method_types: ["card"],
+      line_items: cart.map((item) => ({
+        price_data: {
+          currency: "usd",  // You can change this to your preferred currency
+          product_data: {
+            name: item.name,
+            images: [item.photo],  // Optional: Include product images
+          },
+          unit_amount: item.price * 100,  // Convert price to cents
+        },
+        quantity: item.quantity,
+      })),
+      mode: "payment",
+      success_url: `${process.env.FRONTEND_URL}/success`,  // Redirect URL on success
+      cancel_url: `${process.env.FRONTEND_URL}/cancel`,    // Redirect URL on cancellation
+    });
+
+    // Return sessionId to the frontend for redirection to Stripe's checkout page
+    res.json({ sessionId: session.id });
+  } catch (error) {
+    console.error("Error creating Stripe session:", error);
+    res.status(500).send("Error creating Stripe session");
+  }
+});
 
 // Default Route for Invalid Paths
 app.all("*", (req, res) => {
